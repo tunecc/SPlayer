@@ -1,0 +1,146 @@
+# 同步上游 (SPlayer-Dev/SPlayer) 并仅构建 macOS arm64 安装包
+name: Sync Upstream & Build macOS arm64
+
+on:
+  # 定时同步：每天 UTC 20:00（北京时间次日 04:00）
+  schedule:
+    - cron: "0 20 * * *"
+  # 手动触发
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: 22.x
+  UPSTREAM_REPO: https://github.com/SPlayer-Dev/SPlayer.git
+  UPSTREAM_BRANCH: dev
+  TARGET_BRANCH: dev
+
+# 避免同步任务并发导致 push 竞态
+concurrency:
+  group: sync-and-build-mac
+  cancel-in-progress: false
+
+jobs:
+  # ===================================================================
+  #  同步上游：merge upstream/dev，保留本地自定义修改
+  # ===================================================================
+  sync:
+    name: Sync upstream
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      changed: ${{ steps.merge.outputs.changed }}
+    steps:
+      - name: Checkout target branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          fetch-depth: 0
+          # 使用默认 GITHUB_TOKEN，避免触发现有 dev.yml 全平台构建（防递归机制）
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Merge upstream
+        id: merge
+        run: |
+          git remote add upstream "$UPSTREAM_REPO"
+          git fetch upstream "$UPSTREAM_BRANCH"
+
+          BEFORE=$(git rev-parse HEAD)
+          # 普通 merge：自动合并双方修改，仅在同一处冲突时失败（需人工处理）
+          if ! git merge --no-edit "upstream/$UPSTREAM_BRANCH"; then
+            echo "::error::合并上游时发生冲突，请手动解决后再同步"
+            git merge --abort || true
+            exit 1
+          fi
+          AFTER=$(git rev-parse HEAD)
+
+          if [ "$BEFORE" != "$AFTER" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "✅ 已合并上游更新：$BEFORE -> $AFTER"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "ℹ️ 上游无新提交，已是最新"
+          fi
+
+      - name: Push to origin
+        if: steps.merge.outputs.changed == 'true'
+        run: git push origin "HEAD:$TARGET_BRANCH"
+
+  # ===================================================================
+  #  构建：仅 macOS arm64
+  # ===================================================================
+  build:
+    name: Build macOS arm64
+    needs: sync
+    # 有上游更新，或手动触发时才构建
+    if: needs.sync.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: macos-latest
+    steps:
+      - name: Check out git repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Clean workspace
+        run: |
+          echo "🧹 Cleaning workspace, node_modules, and Electron caches..."
+          rm -rf dist out node_modules ~/.cache/electron-builder ~/.cache/electron
+
+      # macOS 上安装 LLVM 以支持 Wasm 编译
+      - name: Install LLVM
+        run: brew install llvm
+
+      - name: Set Environment Variables
+        run: |
+          echo "CC=$(brew --prefix llvm)/bin/clang" >> $GITHUB_ENV
+          echo "AR=$(brew --prefix llvm)/bin/llvm-ar" >> $GITHUB_ENV
+
+      - name: Copy .env file
+        run: |
+          if [ ! -f .env ]; then
+            cp .env.example .env
+          else
+            echo ".env file already exists. Skipping the copy step."
+          fi
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pnpm build:mac -- --arm64
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v7
+        with:
+          name: SPlayer-macOS-dmg-arm64
+          path: dist/*-arm64.dmg
+
+      - name: Upload Zip
+        uses: actions/upload-artifact@v7
+        with:
+          name: SPlayer-macOS-zip-arm64
+          path: dist/*-arm64.zip
