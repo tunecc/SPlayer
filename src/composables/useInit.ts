@@ -127,6 +127,14 @@ const keyDownEvent = debounce((event: KeyboardEvent) => {
   const isCtrl = event.ctrlKey || event.metaKey;
   const isShift = event.shiftKey;
   const isAlt = event.altKey;
+  // 裸空格始终切换播放 / 暂停（窗口内焦点场景）
+  // 仅在 playOrPause 主键仍为 Space 时生效，从而尊重用户的自定义快捷键
+  if (key === "Space" && !isCtrl && !isShift && !isAlt) {
+    if (shortcutStore.shortcutList.playOrPause.shortcut.split("+").includes("Space")) {
+      player.playOrPause();
+      return;
+    }
+  }
   // 循环注册快捷键
   for (const shortcutKey in shortcutStore.shortcutList) {
     const shortcut = shortcutStore.shortcutList[shortcutKey];

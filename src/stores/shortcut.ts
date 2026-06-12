@@ -35,7 +35,7 @@ export const useShortcutStore = defineStore("shortcut", {
       // 播放或暂停
       playOrPause: {
         name: "播放 / 暂停",
-        shortcut: "CmdOrCtrl+Space",
+        shortcut: "Space",
         globalShortcut: "CmdOrCtrl+Shift+Space",
       },
       // 上一曲 / 下一曲
