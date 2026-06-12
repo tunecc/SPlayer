@@ -47,6 +47,7 @@
       :class="{
         'show-player': musicStore.isHasPlayer && statusStore.showPlayBar,
         'show-full-player': statusStore.showFullPlayer,
+        'mac-inset': isMac && useBorderless,
       }"
       has-sider
     >
@@ -124,7 +125,7 @@
 <script setup lang="ts">
 import { useMusicStore, useStatusStore, useSettingStore, useDataStore } from "@/stores";
 import { useBlobURLManager } from "@/core/resource/BlobURLManager";
-import { isElectron } from "@/utils/env";
+import { isElectron, isMac } from "@/utils/env";
 import { useMobile } from "@/composables/useMobile";
 import { useInit } from "@/composables/useInit";
 
@@ -136,6 +137,9 @@ const dataStore = useDataStore();
 const blobURLManager = useBlobURLManager();
 
 const { isDesktop, isMobile } = useMobile();
+
+// 是否启用无边框窗口（用于 macOS 红绿灯留白）
+const useBorderless = ref(true);
 
 // 主内容
 const contentRef = ref<HTMLElement | null>(null);
@@ -168,7 +172,12 @@ useInit();
 
 onMounted(() => {
   loadBackgroundImage();
-  if (!isElectron) {
+  if (isElectron) {
+    // 读取无边框窗口配置，用于 macOS 顶部红绿灯留白
+    window.api.store.get("window").then((windowConfig) => {
+      useBorderless.value = windowConfig?.useBorderless ?? true;
+    });
+  } else {
     window.addEventListener("beforeunload", (event) => {
       event.preventDefault();
       // 释放所有 blob URL
@@ -239,6 +248,12 @@ onMounted(() => {
         flex-direction: column;
         justify-content: center;
       }
+    }
+  }
+  // macOS 无边框：导航栏增高以容纳顶部红绿灯，内容区顶部同步下移
+  &.mac-inset {
+    #main-content {
+      top: 92px;
     }
   }
   &.show-player {

@@ -313,7 +313,9 @@ onMounted(async () => {
   background-color: transparent;
   -webkit-app-region: drag;
   &.mac-inset {
-    padding-left: 80px; // 为 hiddenInset 红绿灯让位，避免遮挡返回/前进按钮
+    // 整体下移，在顶部留出空间显示 macOS 红绿灯（关闭/最小化/全屏）
+    height: 92px;
+    padding-top: 22px;
   }
   .n-button {
     width: 40px;
