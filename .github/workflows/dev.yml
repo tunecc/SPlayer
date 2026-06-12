@@ -2,22 +2,8 @@
 name: Build Dev
 
 on:
-  push:
-    branches:
-      - dev
-    paths:
-      - "src/**"
-      - "web/**"
-      - "electron/**"
-      - "public/**"
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - "electron-builder.config.ts"
-      - "electron.vite.config.ts"
-      - "tsconfig*.json"
-      - ".env.example"
-      - "Dockerfile"
-      - "docker-compose.yml"
+  # 已禁用 push 自动触发，改由 sync-and-build-mac.yml 负责 dev 推送构建
+  # 如需全平台构建，请在 Actions 页面手动触发本 workflow
   workflow_dispatch:
 
 env:

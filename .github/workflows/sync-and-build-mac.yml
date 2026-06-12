@@ -1,8 +1,12 @@
-# 同步上游 (SPlayer-Dev/SPlayer) 并仅构建 macOS arm64 安装包
+# 同步上游 (SPlayer-Dev/SPlayer) 并仅构建 macOS arm64 安装包，按版本号发布 Release
 name: Sync Upstream & Build macOS arm64
 
 on:
-  # 定时同步：每天 UTC 20:00（北京时间次日 04:00）
+  # 推送到 dev 时构建并发布（主要触发方式）
+  push:
+    branches:
+      - dev
+  # 定时同步上游：每天 UTC 20:00（北京时间次日 04:00）
   schedule:
     - cron: "0 20 * * *"
   # 手动触发
@@ -14,7 +18,7 @@ env:
   UPSTREAM_BRANCH: dev
   TARGET_BRANCH: dev
 
-# 避免同步任务并发导致 push 竞态
+# 避免同步 / 构建并发导致的 push 与 release 竞态
 concurrency:
   group: sync-and-build-mac
   cancel-in-progress: false
@@ -22,9 +26,11 @@ concurrency:
 jobs:
   # ===================================================================
   #  同步上游：merge upstream/dev，保留本地自定义修改
+  #  仅在定时 / 手动触发时执行；push 触发时代码已是最新，跳过
   # ===================================================================
   sync:
     name: Sync upstream
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -36,7 +42,6 @@ jobs:
         with:
           ref: ${{ env.TARGET_BRANCH }}
           fetch-depth: 0
-          # 使用默认 GITHUB_TOKEN，避免触发现有 dev.yml 全平台构建（防递归机制）
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Configure git
@@ -72,19 +77,27 @@ jobs:
         run: git push origin "HEAD:$TARGET_BRANCH"
 
   # ===================================================================
-  #  构建：仅 macOS arm64
+  #  构建：仅 macOS arm64，并按 package.json 版本号发布 Release
   # ===================================================================
   build:
-    name: Build macOS arm64
+    name: Build macOS arm64 & Release
     needs: sync
-    # 有上游更新，或手动触发时才构建
-    if: needs.sync.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+    # 运行条件：push 触发 / 手动触发 / 定时同步且上游有更新
+    # 用 !cancelled() 允许在 sync 被跳过（push 场景）时仍然运行
+    if: >
+      !cancelled() &&
+      (github.event_name == 'push' ||
+       github.event_name == 'workflow_dispatch' ||
+       (needs.sync.result == 'success' && needs.sync.outputs.changed == 'true'))
     runs-on: macos-latest
+    permissions:
+      contents: write
     steps:
       - name: Check out git repository
         uses: actions/checkout@v6
         with:
           ref: ${{ env.TARGET_BRANCH }}
+          fetch-depth: 0
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v5
@@ -127,20 +140,39 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: Build
+      - name: Build macOS arm64 DMG
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: pnpm build:mac -- --arm64
 
-      - name: Upload DMG
+      # 读取版本号用于 Release 命名
+      - name: Read version
+        id: ver
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      # 上传构建产物（保留以便排查）
+      - name: Upload DMG artifact
         uses: actions/upload-artifact@v7
         with:
           name: SPlayer-macOS-dmg-arm64
           path: dist/*-arm64.dmg
 
-      - name: Upload Zip
-        uses: actions/upload-artifact@v7
-        with:
-          name: SPlayer-macOS-zip-arm64
-          path: dist/*-arm64.zip
+      # 按版本号发布 Release：覆盖同名 Release（含 tag）
+      - name: Publish Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v${{ steps.ver.outputs.version }}"
+          echo "发布版本：$TAG"
+          # 覆盖场景：删除已存在的同名 Release 及其 tag，再重新创建
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "已存在同名 Release，执行覆盖"
+            gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag
+          fi
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$TAG" \
+            --notes "macOS arm64 自动构建 (DMG)" \
+            --target "$TARGET_BRANCH" \
+            dist/*-arm64.dmg
