@@ -111,17 +111,26 @@ const initEventListener = () => {
   useEventListener(window, "keydown", keyDownEvent);
 };
 
-// 键盘事件
-const keyDownEvent = debounce((event: KeyboardEvent) => {
+// 键盘事件入口（同步执行，确保 preventDefault 能即时阻止空格/方向键的默认滚动）
+const keyDownEvent = (event: KeyboardEvent) => {
+  const target = event.target as HTMLElement;
+  // 排除输入框，避免吞掉正常输入
+  const extendsDom = ["input", "textarea"];
+  if (extendsDom.includes(target.tagName.toLowerCase())) return;
+  // 同步阻止默认行为（如空格、方向键引起的页面滚动），必须在防抖之前执行
+  event.preventDefault();
+  event.stopPropagation();
+  // 忽略长按产生的自动重复事件，仅在首次按下时分发动作
+  if (event.repeat) return;
+  // 动作分发交给防抖处理
+  dispatchShortcut(event);
+};
+
+// 快捷键动作分发（防抖，避免快速连按重复触发）
+const dispatchShortcut = debounce((event: KeyboardEvent) => {
   const player = usePlayerController();
   const shortcutStore = useShortcutStore();
   const statusStore = useStatusStore();
-  const target = event.target as HTMLElement;
-  // 排除元素
-  const extendsDom = ["input", "textarea"];
-  if (extendsDom.includes(target.tagName.toLowerCase())) return;
-  event.preventDefault();
-  event.stopPropagation();
   // 获取按键信息
   const key = event.code;
   const isCtrl = event.ctrlKey || event.metaKey;

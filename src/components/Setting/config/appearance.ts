@@ -1,5 +1,5 @@
 import { useSettingStore, useStatusStore } from "@/stores";
-import { isElectron } from "@/utils/env";
+import { isElectron, isMac } from "@/utils/env";
 import {
   openFontManager,
   openCustomCode,
@@ -501,6 +501,21 @@ export const useAppearanceSettings = (): SettingConfig => {
             value: computed({
               get: () => settingStore.timeFormat,
               set: (v) => (settingStore.timeFormat = v),
+            }),
+          },
+          {
+            key: "macStatusBarHideSongName",
+            label: "状态栏仅显示图标",
+            type: "switch",
+            show: isElectron && isMac,
+            description: "隐藏 macOS 状态栏歌曲名称，仅显示软件图标（不影响状态栏歌词）",
+            value: computed({
+              get: () => settingStore.macos.hideStatusBarSongName,
+              set: (v) => {
+                settingStore.macos.hideStatusBarSongName = v;
+                window.electron.ipcRenderer.send("macos-statusbar:toggle-song-name", v);
+                window.$message.success(`${v ? "已隐藏" : "已显示"}状态栏歌名`);
+              },
             }),
           },
         ],
