@@ -15,6 +15,14 @@ let currentSongTitle = appName;
 export const getCurrentSongTitle = () => currentSongTitle;
 
 /**
+ * 获取用于状态栏展示的歌曲标题
+ * 若开启「仅显示图标」，则返回空串，使菜单栏只剩软件图标
+ * @returns 展示用标题
+ */
+export const getDisplaySongTitle = (): string =>
+  (useStore().get("macos.hideStatusBarSongName") ?? false) ? "" : getCurrentSongTitle();
+
+/**
  * 托盘 IPC
  */
 const initTrayIpc = (): void => {
@@ -38,7 +46,8 @@ const initTrayIpc = (): void => {
     currentSongTitle = title;
     // 更改托盘标题：仅在非 macOS 状态栏歌词模式下，或 macOS 歌词未启用时，才更新托盘标题为歌曲名
     if (!isMac || !isMacLyricEnabled) {
-      tray?.setTitle(title);
+      const hideSongName = store.get("macos.hideStatusBarSongName") ?? false;
+      tray?.setTitle(hideSongName ? "" : title);
     }
     tray?.setPlayName(title);
   });

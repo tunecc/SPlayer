@@ -1,5 +1,5 @@
 <template>
-  <n-layout-header class="nav">
+  <n-layout-header class="nav" :class="{ 'mac-inset': isMac && useBorderless }">
     <!-- 页面导航 -->
     <n-flex class="page-control">
       <Logo v-if="!isDesktop" :size="40" @click="router.push('/')" />
@@ -73,7 +73,7 @@
     </n-flex>
     <!-- 客户端控制 -->
     <n-flex
-      v-if="isElectron && !isSmallScreen && useBorderless"
+      v-if="isElectron && !isSmallScreen && useBorderless && !isMac"
       align="center"
       class="client-control"
     >
@@ -147,7 +147,7 @@ import type { DropdownOption } from "naive-ui";
 import { useSettingStore, useStatusStore } from "@/stores";
 import { renderIcon } from "@/utils/helper";
 import { openSetting, openThemeConfig, openScalingModal, openUpdateApp } from "@/utils/modal";
-import { isDev, isElectron } from "@/utils/env";
+import { isDev, isElectron, isMac } from "@/utils/env";
 import { useMobile } from "@/composables/useMobile";
 
 const router = useRouter();
@@ -312,6 +312,9 @@ onMounted(async () => {
   padding: 0 1rem;
   background-color: transparent;
   -webkit-app-region: drag;
+  &.mac-inset {
+    padding-left: 80px; // 为 hiddenInset 红绿灯让位，避免遮挡返回/前进按钮
+  }
   .n-button {
     width: 40px;
     height: 40px;

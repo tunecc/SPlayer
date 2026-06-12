@@ -4,7 +4,7 @@ import { ipcMain } from "electron";
 import { useStore } from "../store";
 import { getMainTray } from "../tray";
 import mainWindow from "../windows/main-window";
-import { getCurrentSongTitle } from "./ipc-tray";
+import { getDisplaySongTitle } from "./ipc-tray";
 
 let macLyricLines: LyricLine[] = [];
 let macCurrentTime = 0;
@@ -77,13 +77,13 @@ const updateMacStatusBarLyric = (forceUpdate: boolean = false) => {
   const isMacosLyricEnabled = store.get("macos.statusBarLyric.enabled") ?? false;
   if (!isMacosLyricEnabled) {
     // 如果功能被禁用，则确保托盘标题显示为当前歌曲名，并立即返回
-    tray.setTitle(getCurrentSongTitle());
+    tray.setTitle(getDisplaySongTitle());
     return;
   }
 
   // 如果歌词数据为空，则显示当前歌曲标题，避免空白
   if (macLyricLines.length === 0) {
-    tray.setTitle(getCurrentSongTitle());
+    tray.setTitle(getDisplaySongTitle());
     return;
   }
 
@@ -100,7 +100,7 @@ const updateMacStatusBarLyric = (forceUpdate: boolean = false) => {
           .map((w) => w.word ?? "")
           .join("")
           .trim()
-      : getCurrentSongTitle(); // 处于前奏或未匹配到歌词时，显示歌曲名
+      : getDisplaySongTitle(); // 处于前奏或未匹配到歌词时，显示歌曲名
 
   tray.setTitle(currentLyric);
 };
@@ -115,7 +115,7 @@ export const initMacStatusBarIpc = () => {
   // 根据初始设置状态更新托盘显示
   // 如果禁用，设置回歌曲标题
   if (!isMacosLyricEnabled) {
-    tray?.setTitle(getCurrentSongTitle());
+    tray?.setTitle(getDisplaySongTitle());
   }
 
   // 新增 macOS 专属设置切换监听
@@ -134,14 +134,21 @@ export const initMacStatusBarIpc = () => {
         mainWin.webContents.send(TASKBAR_IPC_CHANNELS.REQUEST_DATA);
       } else {
         // 关闭时，将标题恢复为歌曲名，并停止歌词插值计时器
-        tray?.setTitle(getCurrentSongTitle());
+        tray?.setTitle(getDisplaySongTitle());
         stopInterpolation();
       }
     } else if (!show) {
       // 如果主窗口不可用且正在关闭，也恢复标题并停止计时器
-      tray?.setTitle(getCurrentSongTitle());
+      tray?.setTitle(getDisplaySongTitle());
       stopInterpolation();
     }
+  });
+
+  // 「仅显示图标」切换：隐藏/显示状态栏歌曲名
+  ipcMain.on("macos-statusbar:toggle-song-name", (_e, hide: boolean) => {
+    store.set("macos.hideStatusBarSongName", hide);
+    // 复用刷新逻辑：歌词开启则显示歌词，否则按新设置显示歌名/空
+    updateMacStatusBarLyric(true);
   });
 
   ipcMain.on(TASKBAR_IPC_CHANNELS.SYNC_STATE, (_event, payload: SyncStatePayload) => {

@@ -481,6 +481,8 @@ export interface SettingState {
       /** 是否启用 */
       enabled: boolean;
     };
+    /** 隐藏状态栏歌曲名，仅显示图标 */
+    hideStatusBarSongName: boolean;
   };
 }
 
@@ -750,6 +752,7 @@ export const useSettingStore = defineStore("setting", {
       statusBarLyric: {
         enabled: false,
       },
+      hideStatusBarSongName: false,
     },
   }),
   getters: {

@@ -1,7 +1,7 @@
 import { app, type BrowserWindow, shell } from "electron";
 import { processLog } from "../logger";
 import { useStore } from "../store";
-import { isLinux, isWin, mainWinUrl } from "../utils/config";
+import { isLinux, isMac, isWin, mainWinUrl } from "../utils/config";
 import { loadNativeModule } from "../utils/native-loader";
 import { createWindow } from "./index";
 
@@ -123,7 +123,7 @@ class MainWindow {
     const { width, height, useBorderless = true } = store.get("window");
     this.win = createWindow({
       // 菜单栏
-      titleBarStyle: useBorderless ? "customButtonsOnHover" : "default",
+      titleBarStyle: useBorderless ? (isMac ? "hiddenInset" : "customButtonsOnHover") : "default",
       frame: !useBorderless,
       width,
       height,
@@ -170,11 +170,16 @@ class MainWindow {
    * 显示主窗口
    */
   showWindow() {
-    if (this.win) {
-      this.win.show();
+    if (this.win && !this.win.isDestroyed()) {
       if (this.win.isMinimized()) this.win.restore();
+      this.win.show();
       this.win.focus();
+      return;
     }
+    // 窗口已销毁/不存在：重建
+    this.create();
+    this.win?.show();
+    this.win?.focus();
   }
 }
 export default new MainWindow();
