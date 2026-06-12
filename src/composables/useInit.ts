@@ -5,7 +5,7 @@ import { useDataStore, useSettingStore, useShortcutStore, useStatusStore } from 
 import { TASKBAR_IPC_CHANNELS } from "@/types/shared";
 import { isElectron, isMac } from "@/utils/env";
 import { printVersion } from "@/utils/log";
-import { openUserAgreement } from "@/utils/modal";
+import { openSetting, openUserAgreement } from "@/utils/modal";
 import { useEventListener } from "@vueuse/core";
 import { debounce } from "lodash-es";
 import { onMounted, watch } from "vue";
@@ -111,40 +111,27 @@ const initEventListener = () => {
   useEventListener(window, "keydown", keyDownEvent);
 };
 
-// 键盘事件入口（同步执行，确保 preventDefault 能即时阻止空格/方向键的默认滚动）
-const keyDownEvent = (event: KeyboardEvent) => {
-  const target = event.target as HTMLElement;
-  // 排除输入框，避免吞掉正常输入
-  const extendsDom = ["input", "textarea"];
-  if (extendsDom.includes(target.tagName.toLowerCase())) return;
-  // 同步阻止默认行为（如空格、方向键引起的页面滚动），必须在防抖之前执行
-  event.preventDefault();
-  event.stopPropagation();
-  // 忽略长按产生的自动重复事件，仅在首次按下时分发动作
-  if (event.repeat) return;
-  // 动作分发交给防抖处理
-  dispatchShortcut(event);
-};
-
-// 快捷键动作分发（防抖，避免快速连按重复触发）
-const dispatchShortcut = debounce((event: KeyboardEvent) => {
-  const player = usePlayerController();
-  const shortcutStore = useShortcutStore();
-  const statusStore = useStatusStore();
-  // 获取按键信息
+// 判断事件是否命中应用内快捷键，返回命中的 key，否则返回 null
+// 同步执行，用于决定是否需要 preventDefault（避免误吞 Cmd+W / Cmd+Q / Cmd+, 等系统快捷键）
+const matchShortcutKey = (
+  event: KeyboardEvent,
+  shortcutStore: ReturnType<typeof useShortcutStore>,
+): string | null => {
   const key = event.code;
   const isCtrl = event.ctrlKey || event.metaKey;
   const isShift = event.shiftKey;
   const isAlt = event.altKey;
-  // 裸空格始终切换播放 / 暂停（窗口内焦点场景）
-  // 仅在 playOrPause 主键仍为 Space 时生效，从而尊重用户的自定义快捷键
+  // 裸空格始终切换播放 / 暂停（仅在 playOrPause 主键仍为 Space 时生效，尊重用户自定义）
   if (key === "Space" && !isCtrl && !isShift && !isAlt) {
     if (shortcutStore.shortcutList.playOrPause.shortcut.split("+").includes("Space")) {
-      player.playOrPause();
-      return;
+      return "playOrPause";
     }
   }
-  // 循环注册快捷键
+  // Cmd/Ctrl + , 打开设置（macOS 习惯）
+  if (key === "Comma" && isCtrl && !isShift && !isAlt) {
+    return "openSetting";
+  }
+  // 遍历已注册快捷键
   for (const shortcutKey in shortcutStore.shortcutList) {
     const shortcut = shortcutStore.shortcutList[shortcutKey];
     const shortcutParts = shortcut.shortcut.split("+");
@@ -167,50 +154,77 @@ const dispatchShortcut = debounce((event: KeyboardEvent) => {
       (part: string) => part !== "CmdOrCtrl" && part !== "Shift" && part !== "Alt",
     );
     if (mainKey !== key) match = false;
-    if (match && shortcutKey) {
-      console.log(shortcutKey, `快捷键触发: ${shortcut.name}`);
-      switch (shortcutKey) {
-        case "playOrPause":
-          player.playOrPause();
-          break;
-        case "playPrev":
-          player.nextOrPrev("prev");
-          break;
-        case "playNext":
-          player.nextOrPrev("next");
-          break;
-        case "seekForward":
-          player.seekBy(5000);
-          break;
-        case "seekBackward":
-          player.seekBy(-5000);
-          break;
-        case "volumeUp":
-          player.setVolume("up");
-          break;
-        case "volumeDown":
-          player.setVolume("down");
-          break;
-        case "toggle-desktop-lyric":
-          player.toggleDesktopLyric();
-          break;
-        case "openPlayer":
-          // 打开播放界面（任意界面）
-          statusStore.showFullPlayer = true;
-          break;
-        case "closePlayer":
-          // 关闭播放界面（仅在播放界面时）
-          if (statusStore.showFullPlayer) {
-            statusStore.showFullPlayer = false;
-          }
-          break;
-        case "openPlayList":
-          // 打开播放列表（任意界面）
-          statusStore.playListShow = !statusStore.playListShow;
-          break;
-        default:
-          break;
+    if (match && shortcutKey) return shortcutKey;
+  }
+  return null;
+};
+
+// 键盘事件入口（同步执行，命中应用内快捷键时才阻止默认行为）
+const keyDownEvent = (event: KeyboardEvent) => {
+  const target = event.target as HTMLElement;
+  // 排除输入框，避免吞掉正常输入
+  const extendsDom = ["input", "textarea"];
+  if (extendsDom.includes(target.tagName.toLowerCase())) return;
+  // 仅当命中应用内快捷键时才处理；否则放行（保留 Cmd+W / Cmd+Q 等系统快捷键）
+  const matchedKey = matchShortcutKey(event, useShortcutStore());
+  if (!matchedKey) return;
+  // 命中后再阻止默认行为（如空格、方向键引起的页面滚动）
+  event.preventDefault();
+  event.stopPropagation();
+  // 忽略长按产生的自动重复事件，仅在首次按下时分发动作
+  if (event.repeat) return;
+  // 动作分发交给防抖处理
+  dispatchShortcut(matchedKey);
+};
+
+// 快捷键动作分发（防抖，避免快速连按重复触发）
+const dispatchShortcut = debounce((shortcutKey: string) => {
+  const player = usePlayerController();
+  const statusStore = useStatusStore();
+  switch (shortcutKey) {
+    case "playOrPause":
+      player.playOrPause();
+      break;
+    case "playPrev":
+      player.nextOrPrev("prev");
+      break;
+    case "playNext":
+      player.nextOrPrev("next");
+      break;
+    case "seekForward":
+      player.seekBy(5000);
+      break;
+    case "seekBackward":
+      player.seekBy(-5000);
+      break;
+    case "volumeUp":
+      player.setVolume("up");
+      break;
+    case "volumeDown":
+      player.setVolume("down");
+      break;
+    case "toggle-desktop-lyric":
+      player.toggleDesktopLyric();
+      break;
+    case "openPlayer":
+      // 打开播放界面（任意界面）
+      statusStore.showFullPlayer = true;
+      break;
+    case "closePlayer":
+      // 关闭播放界面（仅在播放界面时）
+      if (statusStore.showFullPlayer) {
+        statusStore.showFullPlayer = false;
       }
-    }
+      break;
+    case "openPlayList":
+      // 打开播放列表（任意界面）
+      statusStore.playListShow = !statusStore.playListShow;
+      break;
+    case "openSetting":
+      // 打开设置（Cmd/Ctrl + ,）
+      openSetting();
+      break;
+    default:
+      break;
   }
 }, 100);
